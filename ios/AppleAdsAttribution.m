@@ -1,7 +1,6 @@
 #import "AppleAdsAttribution.h"
 #import <React/RCTLog.h>
 #import <AdServices/AdServices.h>
-#import <iAd/iAd.h>
 
 @implementation AppleAdsAttribution
 static NSString *const RNAAAErrorDomain = @"RNAAAErrorDomain";
@@ -92,44 +91,8 @@ API_AVAILABLE(ios(14.3)) {
             [details setValue:@"Request to Adservices API failed with unknown error" forKey:NSLocalizedDescriptionKey];
             NSError* error = [NSError errorWithDomain:RNAAAErrorDomain code:100 userInfo:details];
             completionHandler(nil, error);
-            
         }
     }] resume];
-}
-
-/**
- * Tries to generate an attribution token that then can be used for calls to apples AdServices API.
- * Returns nil if token couldn't be generated.
- */
-+ (NSString *) getAdServicesAttributionToken:(NSError * _Nullable *)error {
-    if([AppleAdsAttribution isSimulator]) {
-        if (error != NULL) {
-            NSMutableDictionary* details = [NSMutableDictionary dictionary];
-            [details setValue:@"Error getting token, not available in Simulator" forKey:NSLocalizedDescriptionKey];
-            *error = [NSError errorWithDomain:RNAAAErrorDomain code:100 userInfo:details];
-        }
-        return nil;
-    }
-
-    if (@available(iOS 14.3, *))
-    {
-        Class AAAttributionClass = NSClassFromString(@"AAAttribution");
-        if (AAAttributionClass) {
-            NSString *attributionToken = [AAAttributionClass attributionTokenWithError:error];
-            if (*error == nil && attributionToken) {
-                return attributionToken;
-            }
-        } else {
-            NSMutableDictionary* details = [NSMutableDictionary dictionary];
-            [details setValue:@"Error getting token, AAAttributionClass not found" forKey:NSLocalizedDescriptionKey];
-            *error = [NSError errorWithDomain:RNAAAErrorDomain code:100 userInfo:details];
-        }
-    } else if (error != NULL) {
-        NSMutableDictionary* details = [NSMutableDictionary dictionary];
-        [details setValue:@"Error getting token, AdServices not available pre iOS 14.3" forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:RNAAAErrorDomain code:100 userInfo:details];
-    }
-    return nil;
 }
 
 /**
@@ -146,11 +109,9 @@ API_AVAILABLE(ios(14.3)) {
         if (attributionToken) {
             [AppleAdsAttribution requestAdServicesAttributionDataUsingToken:attributionToken retriesLeft:NUM_RETRIES completionHandler:completionHandler];
         } else {
-            // No token
             completionHandler(nil, tokenError);
         }
     } else {
-        // Not supported on this device
         NSMutableDictionary* details = [NSMutableDictionary dictionary];
         [details setValue:@"AdServices not available pre iOS 14.3" forKey:NSLocalizedDescriptionKey];
         NSError* error = [NSError errorWithDomain:RNAAAErrorDomain code:100 userInfo:details];
@@ -159,80 +120,7 @@ API_AVAILABLE(ios(14.3)) {
 }
 
 /**
- * Gets attribution data from the old iAd API.
- * completionHandler will return nil with an error if attribution data couldn't be retrieved. Reasons for failing may be that the user disabled tracking or that the iOS version is < 10.
- */
-+ (void) getiAdAttributionDataWithCompletionHandler: (void (^)(NSDictionary * _Nullable data, NSError * _Nullable error))completionHandler {
-    
-    if ([[ADClient sharedClient] respondsToSelector:@selector(requestAttributionDetailsWithBlock:)]) {
-        [[ADClient sharedClient] requestAttributionDetailsWithBlock: ^(NSDictionary *attributionDetails, NSError *error) {
-            if (error == nil) {
-                completionHandler(attributionDetails, nil);
-            } else {
-                NSLog(@"getiAdAttributionDataWithCompletionHandler error getting data %@", error);
-                completionHandler(nil, error);
-            }
-        }];
-    } else {
-        // requestAttributionDetailsWithBlock is not available probably < iOS 10
-        NSMutableDictionary* details = [NSMutableDictionary dictionary];
-        [details setValue:@"iAd ADClient not available" forKey:NSLocalizedDescriptionKey];
-        NSError* error = [NSError errorWithDomain:RNAAAErrorDomain code:100 userInfo:details];
-        completionHandler(nil, error);
-    }
-}
-
-/**
- * Tries to get attribution data first using the AdServices API. If it fails it fallbacks to the old iAd API.
- * Rejected with error if both fails
- */
-RCT_EXPORT_METHOD(getAttributionData:
-                  (RCTPromiseResolveBlock) resolve
-                  rejecter:
-                  (RCTPromiseRejectBlock) reject) {
-    
-    [AppleAdsAttribution getAdServicesAttributionDataWithCompletionHandler:^(NSDictionary * _Nullable attributionData, NSError * _Nullable adServicesError) {
-        if (attributionData != nil) {
-            resolve(attributionData);
-        } else {
-            // Fallback to old iAd client API
-            [AppleAdsAttribution getiAdAttributionDataWithCompletionHandler:^(NSDictionary * _Nullable data, NSError * _Nullable iAdError) {
-                if (data != nil) {
-                    resolve(data);
-                } else {
-                    // Reject with both error messages
-                    NSString *combinedErrorMessage = [NSString stringWithFormat:@"Ad services error: %@. \niAD error: %@", adServicesError != NULL ? adServicesError.localizedDescription : @"no error message", iAdError != NULL ? iAdError.localizedDescription : @"no error message"];
-                    
-                    [AppleAdsAttribution rejectPromiseWithUserInfo:reject
-                                                          userInfo:[@{
-                                                            @"code" : @"unknown",
-                                                            @"message" : combinedErrorMessage
-                                                          } mutableCopy]];
-                }
-                
-            }];
-        }
-    }];
-}
-
-/**
- * Tries to get attribution data using the old iAd API.
- * Rejected with error if it failed to get data
- *  */
-RCT_EXPORT_METHOD(getiAdAttributionData: (RCTPromiseResolveBlock) resolve rejecter: (RCTPromiseRejectBlock) reject) {
-    
-    [AppleAdsAttribution getiAdAttributionDataWithCompletionHandler:^(NSDictionary * _Nullable data, NSError * _Nullable error) {
-        if(data != nil) {
-            resolve(data);
-        } else {
-            [AppleAdsAttribution rejectPromiseWithNSError:reject error:error];
-        }
-        
-    }];
-}
-
-/**
- * Tries to generate an attribution token that then can be used for calls to Apples AdServices API.
+ * Tries to generate an attribution token that then can be used to call Apples AdServices API.
  * Rejected with error if token couldn't be generated.
  */
 RCT_EXPORT_METHOD(getAdServicesAttributionToken: (RCTPromiseResolveBlock) resolve rejecter: (RCTPromiseRejectBlock) reject) {
